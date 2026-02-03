@@ -1,0 +1,151 @@
+---
+title: "How significant are kills in the NBA?"
+author: "Shashwat Mishra"
+date: "2026-02-02"
+output: pdf_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r}
+library(dplyr)
+library(ggplot2)
+library(ggthemes)
+library(hoopR)
+```
+
+```{r}
+season24_25 <- load_nba_pbp(
+  seasons = 2025
+)
+```
+
+
+```{r}
+mavs_2025 <- season24_25 %>%
+  filter(home_team_abbrev == "DAL" | away_team_abbrev == "DAL")
+```
+
+```{r}
+mavs_2025 <- mavs_2025 %>%
+  arrange(game_id, period, desc(clock_seconds)) %>%
+  mutate(
+    mavs_on_defense = case_when(
+      home_team_abbrev == "DAL" & team_id == away_team_id ~ TRUE,
+      away_team_abbrev == "DAL" & team_id == home_team_id ~ TRUE,
+      TRUE ~ FALSE
+    ),
+
+    opp_turnover = mavs_on_defense &
+      grepl(
+      "Turnover|Offensive Foul|Violation",
+      type_text,
+      ignore.case = TRUE
+    ),
+
+    opp_missed_shot = mavs_on_defense &
+      grepl("misses", text),
+
+    mavs_def_reb = !mavs_on_defense &
+      type_text == "Defensive Rebound"
+  )
+
+mavs_2025 <- mavs_2025 %>%
+  arrange(
+    game_id,
+    period_number,
+    desc(clock_minutes),
+    desc(clock_seconds)
+  )
+
+mavs_2025 <- mavs_2025 %>%
+  mutate(
+    opp_scored = mavs_on_defense & scoring_play
+  )
+```
+
+
+```{r}
+mavs_2025 <- mavs_2025 %>%
+  mutate(
+    defensive_stop = case_when(
+      opp_turnover ~ 1,
+      opp_missed_shot & lead(mavs_def_reb, default = FALSE) ~ 1,
+      TRUE ~ 0
+    )
+  )
+```
+
+```{r}
+# Create possession index
+mavs_2025 <- mavs_2025 %>%
+  arrange(
+    game_id,
+    period_number,
+    desc(clock_minutes),
+    desc(clock_seconds)
+  ) %>%
+  mutate(
+    possession_change = case_when(
+      opp_turnover ~ 1,
+      mavs_def_reb ~ 1,
+      scoring_play ~ 1,
+      TRUE ~ 0
+    )
+  ) %>%
+  group_by(game_id) %>%
+  mutate(
+    possession = cumsum(possession_change)
+  ) %>%
+  ungroup()
+
+```
+
+
+```{r}
+stops_by_possession <- mavs_2025 %>%
+  group_by(game_id, possession) %>%
+  summarise(
+    stop = as.integer(any(defensive_stop == 1)),
+    .groups = "drop"
+  )
+
+kills_by_possession <- stops_by_possession %>%
+  arrange(game_id, possession) %>%
+  group_by(game_id) %>%
+  mutate(
+    stop_streak = ifelse(
+      stop == 1,
+      ave(stop, cumsum(stop == 0), FUN = cumsum),
+      0
+    ),
+    kill = ifelse(stop_streak %% 3 == 0 & stop_streak > 0, 1, 0)
+  ) %>%
+  ungroup()
+
+
+kills_per_game <- kills_by_possession %>%
+  group_by(game_id) %>%
+  summarise(
+    kills = sum(kill),
+    .groups = "drop"
+  )
+
+```
+
+```{r}
+# Sanity Check
+kills_by_possession %>%
+  filter(game_id == 401703376) %>%
+  select(possession, stop, stop_streak, kill)
+```
+
+
+
+
+
+
+
+
