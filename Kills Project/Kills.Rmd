@@ -9,12 +9,25 @@ output: pdf_document
 knitr::opts_chunk$set(echo = TRUE)
 ```
 
-```{r}
+```{r echo=FALSE, message=FALSE, warning=FALSE}
 library(dplyr)
 library(ggplot2)
 library(ggthemes)
 library(hoopR)
+library(tidyr)
 ```
+
+# Kills in the NBA: Testing Sean Miller's theory of kills & win percentage
+
+There really are a lot of new things you learn in college outside of class. Sometimes, it can happen at a basketball game. After the departure of Texas phenom Tre Johnson to the NBA, and subsequently, coach Rodney Terry (after a miraculous entry into the tournament and proceeding 1st round exit), I was excited to see Sean Miller take over.
+
+After going to the Longhorns' season opener, the pregame video was about a stat I'd never heard before: kills. A kill is simple, 3 defensive stops in a row, be it by missed shot + defensive rebound, offensive foul, steal, etc. Miller proclaimed that reaching the area around 7+ kills brings win probability of the game up to 90%.
+
+This project just look at how kills translate to the NBA, a league dominated by star-studded offenses.
+
+## Part 1: Testing Scope: Using a smaller sample (Dallas Mavericks 2024-2025)
+
+### 1. Load NBA play-by-play data for the 2024-25 season
 
 ```{r}
 season24_25 <- load_nba_pbp(
@@ -22,11 +35,14 @@ season24_25 <- load_nba_pbp(
 )
 ```
 
+### 2. Look at only Mavs games
 
 ```{r}
 mavs_2025 <- season24_25 %>%
   filter(home_team_abbrev == "DAL" | away_team_abbrev == "DAL")
 ```
+
+### 3. Analyzing Defensive Stops by text data
 
 ```{r}
 mavs_2025 <- mavs_2025 %>%
@@ -52,6 +68,7 @@ mavs_2025 <- mavs_2025 %>%
       type_text == "Defensive Rebound"
   )
 
+#Organize by game in order
 mavs_2025 <- mavs_2025 %>%
   arrange(
     game_id,
@@ -64,8 +81,10 @@ mavs_2025 <- mavs_2025 %>%
   mutate(
     opp_scored = mavs_on_defense & scoring_play
   )
+
 ```
 
+### 4. Defensive Stops
 
 ```{r}
 mavs_2025 <- mavs_2025 %>%
@@ -77,6 +96,8 @@ mavs_2025 <- mavs_2025 %>%
     )
   )
 ```
+
+### 5. Making a possession index
 
 ```{r}
 # Create possession index
@@ -103,6 +124,7 @@ mavs_2025 <- mavs_2025 %>%
 
 ```
 
+### 6. Kills logic + merging onto original data
 
 ```{r}
 stops_by_possession <- mavs_2025 %>%
@@ -142,10 +164,109 @@ kills_by_possession %>%
   select(possession, stop, stop_streak, kill)
 ```
 
+### 7. Merging with Mavs wins
+
+```{r}
+mavs_games <- load_nba_team_box(seasons = 2025) %>%
+  filter(team_abbreviation == "DAL")
+
+# Merge kills with results
+mavs_kills_wins <- kills_per_game %>%
+  left_join(mavs_games, by = "game_id")
+
+```
+
+```{r}
+kills_per_game <- kills_by_possession %>%
+  group_by(game_id) %>%
+  summarise(
+    kills = sum(kill),
+    .groups = "drop"
+  )
+
+nrow(kills_per_game)
+
+```
+
+```{r}
+mavs_kills_games <- mavs_games %>%
+  left_join(
+    kills_per_game,
+    by = "game_id"
+  ) %>%
+  mutate(
+    kills = replace_na(kills, 0)
+  )
+#count total number of kills
+mavs_kills_games %>%
+  summarise(total_kills = sum(kills))
+
+mavs_kills_games <- mavs_kills_games %>%
+  mutate(win_num = as.integer(team_winner))
+```
+
+### 8. Logistic Regression Model
+
+```{r}
+kills_model <- glm(
+  team_winner ~ kills,
+  data = mavs_kills_games,
+  family = binomial
+)
+
+summary(kills_model)
+```
+
+### 9. Graphing the relationship between kills and win percentage
+
+```{r}
+mavs_kill_summary <- mavs_kills_games %>%
+  group_by(kills) %>%
+  summarise(
+    
+    
+    win_rate = mean(win_num),
+    n = n(),
+    .groups = "drop"
+  )
+
+ggplot(mavs_kill_summary, aes(x = kills, y = win_rate)) +
+  geom_point(size = 3) +
+  geom_line() +
+  scale_y_continuous(labels = scales::percent_format()) +
+  labs(
+    title = "Mavericks Win Rate by Number of Kills (2024–25)",
+    x = "Number of Kills",
+    y = "Win Percentage"
+  ) +
+  theme_minimal()
+
+```
 
 
+- home & away team kills, does one team has a lot of kills, does the other team have as many or significantly less.
+
+- find correlation with other defensive metrics (BPG, SPG, etc)
+
+- model with DRTG instead of kills to see difference (compare and see which is better)
+
+- look at the distribution of kills per game, see if there are outliers, and how many games have 7+ kills (the threshold Miller mentioned) and how many of those were wins.
+
+## Moving into the NBA: Expanding the scope to all teams and seasons
+
+```{r}
+pbp_2025 <- season24_25 %>%
+  arrange(game_id, period_number, desc(clock_minutes), desc(clock_seconds)) %>%
+  mutate(
+    defending_team_id = case_when(
+      team_id == home_team_id ~ away_team_id,
+      team_id == away_team_id ~ home_team_id,
+      TRUE ~ NA_integer_
+    )
+  )
 
 
+```
 
 
 
