@@ -135,7 +135,7 @@ All data is sourced via the [`hoopR`](https://hoopr.sportsdataverse.org/) R pack
 
 ## Status
 
-🟢 **Active development**
+ **Active development**
 
 - [x] Kill detection logic validated (Dallas Mavericks, 2024-25)
 - [x] Full league analysis for 2024-25
