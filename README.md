@@ -1,4 +1,4 @@
-# 🏀 Kills in the NBA: Testing Sean Miller's Defensive Theory
+# Kills in the NBA: Testing Sean Miller's Defensive Theory
 
 > *Does the college basketball concept of "kills" translate to the most offense-dominated league in the world?*
 
