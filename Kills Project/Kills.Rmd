@@ -2,7 +2,9 @@
 title: "How significant are kills in the NBA?"
 author: "Shashwat Mishra"
 date: "2026-02-02"
-output: pdf_document
+output:
+  pdf_document:
+    latex_engine: xelatex
 ---
 
 ```{r setup, include=FALSE}
@@ -15,6 +17,7 @@ library(ggplot2)
 library(ggthemes)
 library(hoopR)
 library(tidyr)
+library(nbaplotR)
 ```
 
 # Kills in the NBA: Testing Sean Miller's theory of kills & win percentage
@@ -44,7 +47,7 @@ mavs_2025 <- season24_25 %>%
 
 ### 3. Analyzing Defensive Stops by text data
 
-```{r}
+```{r message=FALSE, warning=FALSE}
 mavs_2025 <- mavs_2025 %>%
   arrange(game_id, period, desc(clock_seconds)) %>%
   mutate(
@@ -86,7 +89,7 @@ mavs_2025 <- mavs_2025 %>%
 
 ### 4. Defensive Stops
 
-```{r}
+```{r message=FALSE, warning=FALSE}
 mavs_2025 <- mavs_2025 %>%
   mutate(
     defensive_stop = case_when(
@@ -99,7 +102,7 @@ mavs_2025 <- mavs_2025 %>%
 
 ### 5. Making a possession index
 
-```{r}
+```{r, warning=FALSE, message=FALSE}
 # Create possession index
 mavs_2025 <- mavs_2025 %>%
   arrange(
@@ -126,7 +129,7 @@ mavs_2025 <- mavs_2025 %>%
 
 ### 6. Kills logic + merging onto original data
 
-```{r}
+```{r warning=FALSE, message=FALSE}
 stops_by_possession <- mavs_2025 %>%
   group_by(game_id, possession) %>%
   summarise(
@@ -157,7 +160,7 @@ kills_per_game <- kills_by_possession %>%
 
 ```
 
-```{r}
+```{r message=FALSE, warning=FALSE}
 # Sanity Check
 kills_by_possession %>%
   filter(game_id == 401703376) %>%
@@ -252,25 +255,25 @@ ggplot(mavs_kill_summary, aes(x = kills, y = win_rate)) +
 
 - look at the distribution of kills per game, see if there are outliers, and how many games have 7+ kills (the threshold Miller mentioned) and how many of those were wins.
 
-## Moving into the NBA: Expanding the scope to all teams and seasons
+# 2. Moving into the NBA: Expanding the scope to all teams and seasons
 
-```{r}
-# ============================================================
+```{r message=FALSE, warning=FALSE}
 # Kills in the NBA: Full League Analysis (2024-25 + Multi-Season)
-# ============================================================
-
 library(dplyr)
 library(ggplot2)
 library(ggthemes)
 library(hoopR)
 library(tidyr)
-library(lme4)       # mixed effects models
+library(lme4)
 library(scales)
 library(purrr)
+```
 
-# ============================================================
+
+```{r}
 # HELPER FUNCTION: Compute kills for one team in one game
-# ============================================================
+ALL_STAR_TEAMS <- c("CHK", "SHQ", "KEN", "CAN")
+
 
 compute_kills_for_team <- function(pbp_data, team_abbrev) {
   team_games <- pbp_data %>%
@@ -328,14 +331,18 @@ compute_kills_for_team <- function(pbp_data, team_abbrev) {
     summarise(kills = sum(kill), team_abbrev = team_abbrev, .groups = "drop")
 }
 
-# ============================================================
+```
+
+
+### 1. League Analysis for the 2024-2025 NBA Season
+
+```{r}
 # PART 1: 2024-25 Full League Analysis
-# ============================================================
 
 season_pbp <- load_nba_pbp(seasons = 2025)
 
 all_teams <- unique(c(season_pbp$home_team_abbrev, season_pbp$away_team_abbrev))
-all_teams <- all_teams[!is.na(all_teams)]
+all_teams <- all_teams[!is.na(all_teams) & !all_teams %in% ALL_STAR_TEAMS]
 
 # Compute kills for all teams (takes a few minutes)
 all_kills <- map_dfr(all_teams, function(tm) {
@@ -354,7 +361,7 @@ kills_wins <- team_box %>%
     win_num = as.integer(team_winner)
   )
 
-# ---- Opponent kills per game (kills allowed) ----
+# (kills allowed per game)
 # Merge home and away kills to get both sides
 home_kills <- all_kills %>%
   rename(home_team_abbrev = team_abbrev, home_kills = kills)
@@ -379,10 +386,12 @@ kills_wins <- kills_wins %>%
     ),
     kills_differential = kills - opp_kills
   )
+```
 
-# ============================================================
+## 2. Logistic Regression Model (Regressing Wins on # Of Kills)
+
+```{r}
 # PART 2: Logistic Regression (full league)
-# ============================================================
 
 # Simple logistic: kills ~ wins
 kills_model_full <- glm(
@@ -407,10 +416,12 @@ kills_mixed <- glmer(
   family = binomial
 )
 summary(kills_mixed)
+```
 
-# ============================================================
+## 3: Looking at Miller's 7+ Kill Threshold
+
+```{r}
 # PART 3: Miller's 7+ Kill Threshold Test
-# ============================================================
 
 kills_wins <- kills_wins %>%
   mutate(seven_plus_kills = kills >= 7)
@@ -436,25 +447,46 @@ kill_bucket_summary <- kills_wins %>%
     .groups = "drop"
   )
 
-# ============================================================
+seven_kills <- kills_wins %>%
+  filter(seven_plus_kills == TRUE)
+```
+
+## 4. Distribution of Kills per Game + Win Rate by Kills (Full League)
+
+```{r}
 # PART 4: Distribution of Kills per Game
-# ============================================================
+
+kill_counts <- kills_wins %>%
+  count(kills) %>%
+  filter(kills >= 5)  # only label the sparse ones
 
 p_dist <- ggplot(kills_wins, aes(x = kills)) +
   geom_histogram(binwidth = 1, fill = "#1D428A", color = "white") +
   geom_vline(xintercept = 7, color = "#C8102E", linetype = "dashed", linewidth = 1) +
-  annotate("text", x = 7.4, y = Inf, label = "Miller's 7-kill threshold",
-           hjust = 0, vjust = 1.5, color = "#C8102E", size = 3.5) +
+  geom_text(data = kill_counts, aes(x = kills, y = n, label = paste0("n=", n)),
+            vjust = -0.5, size = 3, color = "#444") +
+  annotate("text", x = 6.5, y = Inf, label = "Miller's 7-kill threshold",
+           hjust = 1, vjust = 1.5, color = "#C8102E", size = 3.5) +
+  scale_x_continuous(breaks = 0:8, limits = c(-0.5, 8.5)) +
   labs(
     title = "Distribution of Kills per Game — Full NBA 2024-25",
     x = "Kills", y = "Count"
   ) +
   theme_minimal()
 
-# ============================================================
-# PART 5: Win Rate by Kills — Full League
-# ============================================================
+p_dist
 
+lambda <- mean(kills_wins$kills, na.rm = TRUE)  # estimated rate parameter
+
+# P(X <= 2) under Poisson
+ppois(2, lambda = lambda)
+```
+
+## 5. Win Rate by Kills
+
+```{r}
+# PART 5: Win Rate by Kills — Full League
+library(scales)
 league_kill_summary <- kills_wins %>%
   group_by(kills) %>%
   summarise(
@@ -464,22 +496,27 @@ league_kill_summary <- kills_wins %>%
   ) %>%
   filter(n >= 10)  # filter sparse kill counts
 
-p_winrate <- ggplot(league_kill_summary, aes(x = kills, y = win_rate, size = n)) +
-  geom_point(color = "#1D428A", alpha = 0.8) +
+p_winrate <- ggplot(league_kill_summary, aes(x = kills, y = win_rate)) +
+  geom_point(color = "#1D428A", alpha = 0.8, size = 3) +
   geom_smooth(aes(weight = n), method = "loess", se = TRUE,
               color = "#C8102E", fill = "#C8102E", alpha = 0.15) +
   geom_vline(xintercept = 7, linetype = "dashed", color = "gray40") +
+  annotate("text", x = 6.6, y = 0.47, label = "Miller's\nthreshold", 
+           color = "gray40", size = 3, hjust = 0) +
   scale_y_continuous(labels = percent_format()) +
-  scale_size_continuous(name = "Games") +
   labs(
     title = "NBA Win Rate by Kills — Full League 2024-25",
     x = "Kills", y = "Win %"
   ) +
-  theme_minimal()
+  theme_minimal() +
+  theme(legend.position = "none")
+p_winrate
+```
 
-# ============================================================
+## 6. Kills Differential vs. Win Rate
+
+```{r}
 # PART 6: Kills Differential vs Win Rate
-# ============================================================
 
 diff_summary <- kills_wins %>%
   group_by(kills_differential) %>%
@@ -490,21 +527,27 @@ diff_summary <- kills_wins %>%
   ) %>%
   filter(n >= 10)
 
-p_diff <- ggplot(diff_summary, aes(x = kills_differential, y = win_rate, size = n)) +
-  geom_point(color = "#1D428A", alpha = 0.8) +
+p_diff <- ggplot(diff_summary, aes(x = kills_differential, y = win_rate)) +
+  geom_point(color = "#1D428A", alpha = 0.8, size = 3) +
   geom_smooth(aes(weight = n), method = "loess", se = TRUE,
               color = "#C8102E", fill = "#C8102E", alpha = 0.15) +
   geom_vline(xintercept = 0, linetype = "dashed", color = "gray40") +
+  annotate("text", x = 0.2, y = 0.97, label = "Even kills",
+           color = "gray40", size = 3, hjust = 0) +
   scale_y_continuous(labels = percent_format()) +
   labs(
     title = "Win Rate by Kills Differential (Your Kills − Opponent Kills)",
     x = "Kills Differential", y = "Win %"
   ) +
-  theme_minimal()
+  theme_minimal() +
+  theme(legend.position = "none")
+p_diff
+```
 
-# ============================================================
+## 7. Kills Per Team (Total + Averages)
+
+```{r}
 # PART 7: Team-Level Kills Leaderboard (season averages)
-# ============================================================
 
 team_kill_avgs <- kills_wins %>%
   group_by(team_abbreviation) %>%
@@ -520,20 +563,24 @@ team_kill_avgs <- kills_wins %>%
 print(team_kill_avgs)
 
 # Scatter: avg kills vs win pct by team
-p_team <- ggplot(team_kill_avgs, aes(x = avg_kills, y = win_pct, label = team_abbreviation)) +
-  geom_point(color = "#1D428A", size = 3) +
-  geom_text(nudge_y = 0.01, size = 2.8) +
-  geom_smooth(method = "lm", se = TRUE, color = "#C8102E", fill = "#C8102E", alpha = 0.15) +
-  scale_y_continuous(labels = percent_format()) +
-  labs(
-    title = "Team Avg Kills vs Win % — 2024-25 NBA",
-    x = "Avg Kills per Game", y = "Win %"
-  ) +
-  theme_minimal()
 
-# ============================================================
+p_team <- team_kill_avgs %>%
+  filter(!team_abbreviation %in% ALL_STAR_TEAMS) %>%
+  ggplot(aes(x = avg_diff, y = win_pct)) +
+  geom_vline(xintercept = 0, linetype = "dashed", color = "gray60") +
+  geom_hline(yintercept = 0.5, linetype = "dashed", color = "gray60") +
+  geom_nba_logos(aes(team_abbr = team_abbreviation), width = 0.055, alpha = 0.9) +
+  scale_y_continuous(labels = percent_format()) +
+  labs(title = "Kills Differential vs Win % by Team — 2024-25 NBA",
+       subtitle = "Teams in top-right quadrant win more AND out-kill opponents",
+       x = "Avg Kills Differential (Kills − Opp Kills)", y = "Win %") +
+  theme_minimal(base_size = 12)
+```
+
+## 8. Multi-Season Analysis (2020-2025)
+
+```{r warning=FALSE}
 # PART 8: Multi-Season Analysis (2020-2025)
-# ============================================================
 
 multi_team_box <- load_nba_team_box(seasons = 2020:2025)
 
@@ -545,7 +592,7 @@ multi_season_kills <- map_dfr(seasons, function(s) {
   pbp <- load_nba_pbp(seasons = s)  # load one season at a time to avoid memory issues
   
   teams <- unique(c(pbp$home_team_abbrev, pbp$away_team_abbrev))
-  teams <- teams[!is.na(teams)]
+  teams <- teams[!is.na(teams) & !teams %in% ALL_STAR_TEAMS]
   
   map_dfr(teams, function(tm) {
     compute_kills_for_team(pbp, tm) %>% mutate(season = s)
@@ -576,23 +623,24 @@ multi_season_summary <- multi_kills_wins %>%
 p_multi <- ggplot(multi_season_summary, aes(x = kills, y = win_rate)) +
   geom_smooth(aes(weight = n), method = "loess", se = FALSE, color = "#1D428A") +
   geom_vline(xintercept = 7, linetype = "dashed", color = "#C8102E") +
+  geom_vline(xintercept = 4, linetype = "dashed", color = "#1EB04C") +
   geom_hline(yintercept = 0.5, linetype = "dotted", color = "gray60") +
   scale_y_continuous(labels = percent_format()) +
   facet_wrap(~season.x) +
   labs(
     title = "NBA Win Rate by Kills — 2020 to 2025",
-    subtitle = "Red dashed line = Miller's 7-kill threshold",
+    subtitle = "Red dashed line = Miller's 7-kill threshold | Blue = 4-kill threshold",
     x = "Kills", y = "Win %"
   ) +
   theme_minimal(base_size = 12)
 
 print(p_multi)
+```
 
-# ============================================================
+## 9. Kills & DRTG
+
+```{r}
 # PART 9: Kills vs DRTG (Defensive Rating) Comparison
-# ============================================================
-# hoopR's team_box includes DRTG for some datasets, or you can pull from nbastatR/basketball-reference
-# If available in team_box:
 
 if ("defensive_rating" %in% colnames(kills_wins)) {
   drtg_model <- glm(
@@ -610,18 +658,79 @@ if ("defensive_rating" %in% colnames(kills_wins)) {
   
   print(kills_vs_drtg)  # Lower AIC = better fit
 }
+```
 
-# ============================================================
-# PRINT ALL PLOTS
-# ============================================================
+### 10. Win % by kill bucket
 
+```{r}
+p_bucket <- ggplot(kill_bucket_summary, aes(x = kill_bucket, y = win_rate, fill = kill_bucket)) +
+  geom_col() +
+  geom_text(aes(label = paste0(round(win_rate * 100, 1), "%\n(n=", n, ")")),
+            vjust = -0.3, size = 3) +
+  scale_y_continuous(labels = percent_format(), limits = c(0, 0.75)) +
+  scale_fill_brewer(palette = "Blues", guide = "none") +
+  labs(title = "Win Rate by Kill Bucket — Full NBA 2024-25",
+       x = "Kill Range", y = "Win %") +
+  theme_minimal()
+```
+
+
+
+
+
+### 11. Print all Plots
+
+```{r warning=FALSE, message=FALSE}
 print(p_dist)
 print(p_winrate)
 print(p_diff)
 print(p_team)
 print(p_multi)
+print(p_bucket)
 ```
 
 
+## 3. Kills Table
 
+```{r}
+library(gt)
+library(nbaplotR)
+
+kills_table <- team_kill_avgs %>%
+  filter(!team_abbreviation %in% ALL_STAR_TEAMS) %>%
+  arrange(desc(avg_diff)) %>%
+  mutate(rank = row_number()) %>%
+  select(rank, team_abbreviation, avg_kills, avg_opp_kills, avg_diff, win_pct) %>%
+  gt() %>%
+  nbaplotR::gt_nba_logos(columns = "team_abbreviation") %>%
+  fmt_number(columns = c(avg_kills, avg_opp_kills, avg_diff), decimals = 2) %>%
+  fmt_percent(columns = win_pct, decimals = 1) %>%
+  cols_label(
+    rank = "Rank",
+    team_abbreviation = "Team",
+    avg_kills = "Avg Kills",
+    avg_opp_kills = "Avg Opp Kills",
+    avg_diff = "Differential",
+    win_pct = "Win %"
+  ) %>%
+  data_color(
+    columns = avg_diff,
+    fn = scales::col_numeric(
+      palette = c("#C8102E", "white", "#1D428A"),
+      domain = NULL
+    )
+  ) %>%
+  data_color(
+    columns = win_pct,
+    fn = scales::col_numeric(
+      palette = c("white", "#1D428A"),
+      domain = c(0, 1)
+    )
+  ) %>%
+  tab_header(
+    title = "NBA Kills per Game — 2024-25 Season",
+    subtitle = "Sorted by avg kills | Color intensity = magnitude"
+  ) 
+
+```
 
